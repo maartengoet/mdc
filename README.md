@@ -6,7 +6,8 @@ This project contains:
 
 - A Go CLI named `mdc`.
 - A SwiftUI macOS app named `MDC Sender.app`.
-- Shared config in `~/.mdc/config.json`, used by both the CLI and UI.
+- A SwiftUI iOS app project named `MDC Sender iOS`.
+- Shared config in `~/.mdc/config.json`, used by the CLI and macOS UI.
 - Image fitting/cropping for the Samsung EM32DX `2560x1440` panel.
 
 It is currently built and tested against a Samsung EM32DX / LH32EMDI display.
@@ -25,6 +26,7 @@ It is currently built and tested against a Samsung EM32DX / LH32EMDI display.
 - Adjust crop focus with `--crop-x` and `--crop-y`.
 - Wait until the display downloads the image before returning.
 - Inspect basic display info through MDC.
+- Send from iPhone with the native SwiftUI iOS app.
 
 ## Quick Start
 
@@ -88,6 +90,55 @@ open "build/MDC Sender.app"
 ```
 
 The app bundles the Go CLI at `Contents/Resources/mdc`, reads the same `~/.mdc/config.json` file, and exposes the same display, transfer, and image fitting options.
+
+## iOS App
+
+Open the native iOS app project:
+
+```sh
+open ios/MDCSenderiOS/MDCSenderiOS.xcodeproj
+```
+
+The iOS app is designed around a large e-paper preview and Liquid Glass-style floating controls. It implements the MDC protocol in Swift because iOS cannot shell out to the Go CLI.
+
+The app includes:
+
+- Photo picking through `PhotosUI`.
+- Native image preprocessing for `original`, `contain`, `cover`, and `stretch`.
+- Temporary local HTTP server for `/content.json`, `/<uuid>.jpg`, and display progress callbacks.
+- MDC TCP secured protocol client with STARTTLS/PIN auth.
+- Wake-on-LAN support.
+- Display settings stored on-device in `UserDefaults`.
+
+See [ios/MDCSenderiOS/README.md](ios/MDCSenderiOS/README.md) for run instructions and design notes.
+
+### iOS v1 Build And Signing
+
+The iOS project is versioned as `1.0.0` build `1` with bundle identifier `net.maarten.mdcsender.ios`.
+
+Build a signed archive:
+
+```sh
+xcodebuild \
+  -project ios/MDCSenderiOS/MDCSenderiOS.xcodeproj \
+  -scheme "MDC Sender iOS" \
+  -configuration Release \
+  -destination generic/platform=iOS \
+  -archivePath build/releases/MDC-Sender-iOS-v1.xcarchive \
+  archive
+```
+
+Export a development/debugging IPA:
+
+```sh
+xcodebuild \
+  -exportArchive \
+  -archivePath build/releases/MDC-Sender-iOS-v1.xcarchive \
+  -exportPath build/releases/MDC-Sender-iOS-v1-debugging \
+  -exportOptionsPlist ios/MDCSenderiOS/ExportOptions.development.plist
+```
+
+This IPA is signed for debugging/development distribution. It is useful for devices covered by the provisioning profile, but it is not a public App Store-style installer. For non-developer installs, use TestFlight/App Store distribution or create an ad-hoc export with a provisioning profile that includes the target device UDIDs.
 
 ## CLI Syntax
 
@@ -216,9 +267,9 @@ For the EMDX display tested here, MDC is exposed on TCP port `1515` with Samsung
 
 The image flow does not stream image bytes through MDC. Instead:
 
-1. The Mac starts a temporary HTTP server.
-2. The server exposes `/content.json` and `/image`.
-3. The CLI sends MDC command `0xC7`.
+1. The Mac or iPhone starts a temporary HTTP server.
+2. The server exposes `/content.json` and an image URL. The CLI/macOS flow uses `/image`; the iOS v1 flow advertises `/<uuid>.jpg` because the tested display rejected JSON-slash-escaped URLs.
+3. The sender sends MDC command `0xC7`.
 4. The command payload is:
 
 ```text
@@ -226,6 +277,7 @@ The image flow does not stream image bytes through MDC. Instead:
 ```
 
 5. The display downloads `content.json`, then downloads the image URL referenced in that manifest.
+6. The display may POST progress to `/content-transfer-progress`; the iOS server accepts this callback and logs the reported status.
 
 This keeps the MDC channel small and matches the display's own content download behavior.
 
@@ -264,6 +316,8 @@ The display is asleep, offline, changing network state, or MDC is not listening.
 
 The display accepted the MDC command but did not fetch the image from the Mac. Set `--local-ip` to the Mac interface on the same network as the display.
 
+For iOS, check the in-app transfer log. If the display reports `URL using bad/illegal format or missing URL`, make sure the manifest advertises a plain unescaped URL such as `http://192.168.1.65:8080/<uuid>.jpg`.
+
 `negative acknowledgement for command ...`
 
 The display rejected that MDC command. Some standard MDC commands are unsupported on the EMDX model even when authentication succeeds.
@@ -292,9 +346,10 @@ Build everything:
 ```sh
 go build -o build/mdc ./cmd/mdc
 scripts/build_macos_app.sh
+xcodebuild -project ios/MDCSenderiOS/MDCSenderiOS.xcodeproj -scheme "MDC Sender iOS" -configuration Release -destination generic/platform=iOS -archivePath build/releases/MDC-Sender-iOS-v1.xcarchive archive
 ```
 
-The Go code owns protocol handling, config, Wake-on-LAN, image preprocessing, the HTTP content server, and the CLI. The SwiftUI app is a native wrapper that shells out to the bundled CLI.
+The Go code owns protocol handling, config, Wake-on-LAN, image preprocessing, the HTTP content server, and the CLI. The macOS SwiftUI app is a native wrapper that shells out to the bundled CLI. The iOS SwiftUI app implements MDC, image rendering, and the local HTTP server natively in Swift.
 
 ## License
 

@@ -1,5 +1,8 @@
+codex.txt
 .DS_Store
 build/
 .build/
 DerivedData/
+xcuserdata/
+*.xcuserstate
 *.swp
